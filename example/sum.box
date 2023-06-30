@@ -1,0 +1,7 @@
+put 10u
+put 20u
+add
+print 1u
+put '\n'
+print 1u
+halt
