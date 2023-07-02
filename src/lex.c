@@ -5,11 +5,13 @@
 #include "lex.h"
 
 const char* token_as_str[TOKEN_CODE_COUNT] = {
-    [TOKEN_CODE_I64    ] = "I64"    ,
-    [TOKEN_CODE_U64    ] = "U64"    ,
-    [TOKEN_CODE_KEYWORD] = "KEYWORD",
-    [TOKEN_CODE_CHAR   ] = "CHAR"   ,
-    [TOKEN_CODE_EOF    ] = "EOF"    ,
+    [TOKEN_CODE_I64  ] = "I64"    ,
+    [TOKEN_CODE_U64  ] = "U64"    ,
+    [TOKEN_CODE_WORD ] = "WORD",
+    [TOKEN_CODE_PREP ] = "PREP"   ,
+    [TOKEN_CODE_EQUAL] = "EQUAL"  ,
+    [TOKEN_CODE_CHAR ] = "CHAR"   ,
+    [TOKEN_CODE_EOF  ] = "EOF"    ,
 };
 
 static void move(Lex* lex) {
@@ -20,6 +22,10 @@ static void move(Lex* lex) {
 static char current(Lex* lex) {
     return lex->src[lex->ind];
 }
+
+// static char prev(Lex* lex, u64 offset) {
+//     return lex->src[lex->ind - offset];
+// }
 
 static char next(Lex* lex, u64 offset) {
     return lex->src[lex->ind + offset];
@@ -41,7 +47,6 @@ static void skip_comment(Lex* lex) {
             move(lex);
             c = current(lex);
         }
-        // move(lex);
         skip_ws(lex);
     }
 }
@@ -69,12 +74,20 @@ static Token number(Lex* lex) {
     }
 }
 
-static Token keyword(Lex* lex) {
+static Token word(Lex* lex) {
     u64 len = 0;
     char c = current(lex);
     while(is_alphanum(c)) { len += 1; move(lex); c = current(lex); }
 
-    return TOKEN(TOKEN_CODE_KEYWORD, lex->src + lex->ind - len, len);
+    return TOKEN(TOKEN_CODE_WORD, lex->src + lex->ind - len, len);
+}
+
+static Token preprocessor(Lex* lex) {
+    u64 len = 0;
+    char c = current(lex);
+    while(is_alphanum(c)) { len += 1; move(lex); c = current(lex); }
+
+    return TOKEN(TOKEN_CODE_PREP, lex->src + lex->ind - len, len);
 }
 
 // TODO: Handle all errors 
@@ -105,20 +118,36 @@ Lex lex_init(const char* path) {
 }
 
 Token lex_next(Lex* lex) {
-    assert(TOKEN_CODE_COUNT == 5 && "Update lex_next function inside lex.c");
+    assert(TOKEN_CODE_COUNT == 7 && "Update lex_next function inside lex.c");
 
     LEX_NEXT_START:
     skip_ws(lex);
 
     char c = current(lex);
     if(is_digit(c)) { return number(lex);  }
-    if(is_alpha(c)) { return keyword(lex); }
+    if(is_alpha(c)) { return word(lex); }
 
     switch(c) {
 
         case '\0':
         {
             return TOKEN(TOKEN_CODE_EOF, NULL, 0);
+        } break;
+
+        case '@':
+        {
+            if(next(lex, 1) == ' ') {
+                //TODO: retrun @ charecter
+            }
+
+            move(lex);
+            return preprocessor(lex);
+        } break;
+
+        case '=':
+        {
+            move(lex);
+            return TOKEN(TOKEN_CODE_EQUAL, lex->src + lex->ind - 1, 1);
         } break;
 
         case '\'':
@@ -177,13 +206,15 @@ Token lex_next_expected(Lex* lex, TokenCode expect) {
 void lex_dump(Lex* lex) {
     Token token = lex_next(lex);
     printf("[LEXER]:\n");
+    u64 i = 0;
     while(token.code != TOKEN_CODE_EOF) {
         if(token.code == TOKEN_CODE_CHAR) {
-            printf("  [%s] -> {%zu}\n", token_as_str[token.code], token.size);
+            printf("  [%zu]: [%s] -> {%zu}\n", i, token_as_str[token.code], token.size);
         } else {
-            printf("  [%s] -> {%.*s}\n", token_as_str[token.code], (int) token.size, token.ptr);
+            printf("  [%zu]: [%s] -> {%.*s}\n", i, token_as_str[token.code], (int) token.size, token.ptr);
         }
         token = lex_next(lex);
+        i += 1;
     }
 }
 

@@ -5,10 +5,13 @@
 #include "pack.h"
 
 #define ARR_SIZE(a) ((sizeof(a) / sizeof(a[0])))
+#define MIN(a, b) (a > b ? b : a)
 
 ValueCode PUT_ARGS[]   = {VAL_CODE_U64, VAL_CODE_I64, VAL_CODE_CHAR};
 ValueCode PRINT_ARGS[] = {VAL_CODE_U64};
 ValueCode FLIP_ARGS[]  = {VAL_CODE_U64};
+
+ValueCode ANY_ARGS[] = {VAL_CODE_VOID, VAL_CODE_U64, VAL_CODE_I64, VAL_CODE_CHAR};
 
 Keyword keywords[OP_CODE_COUNT] = {
     [OP_CODE_PUT] = 
@@ -57,6 +60,10 @@ Keyword keywords[OP_CODE_COUNT] = {
     },
 };
 
+Prep preps[PREP_CODE_COUNT] = {
+    [PREP_CODE_CONST] = { "const", 5, PREP_CODE_CONST},
+};
+
 static Keyword match_kw(Token token) {
     for(u64 i = 0; i < OP_CODE_COUNT; i++) {
         Keyword kw = keywords[i];
@@ -67,12 +74,38 @@ static Keyword match_kw(Token token) {
     return ((Keyword){ NULL, 0, -1, NULL, 0});
 }
 
-static int type_check(Lex* lex, OpCode code, Token* token, Value* v) {
-    ValueCode* codes = keywords[code].rval;
-    u64 len = keywords[code].rcap;
+static Prep match_prep(Token token) {
+        for(u64 i = 0; i < PREP_CODE_COUNT; i++) {
+        Prep prep = preps[i];
+        if(strncmp(token.ptr, prep.word, prep.size) == 0) {
+            return prep;
+        }
+    }
+    return ((Prep){ NULL, 0, -1 });
+}
 
+static Const find_const(Ops* ops, char* label, u64 size) {
+    for(u64 i = 0; i < ops->consts.size; i++) {
+        Const c = ops->consts.data[i];
+        if(strncmp(label, c.name, MIN(size, c.len)) == 0) {
+            return c;
+        }
+    }
+
+    return (Const) {.len = 0};
+}
+
+static int type_check(Ops* ops, Lex* lex, ValueCode* codes, u64 len, Token* token, Value* v) {
     Token operand = lex_next(lex);
     *token = operand;
+
+    if(token->code == TOKEN_CODE_WORD) {
+        Const c = find_const(ops, token->ptr, token->size);
+        if(c.len != 0) { *v = c.val; return 1; }
+        else {
+            return 0;
+        }
+    }
 
     switch(operand.code) {
         case TOKEN_CODE_U64: {
@@ -112,7 +145,31 @@ static int type_check(Lex* lex, OpCode code, Token* token, Value* v) {
     return 0;
 }
 
-static Op keyword(Lex* lex, Token token) {
+static void parse_prep(Ops* ops, Lex* lex, Token token) {
+    Prep prep = match_prep(token);
+
+    if(prep.code == -1) {
+        fprintf(stderr, "[ERROR]: Unknown preprocessor command %.*s\n", (int) token.size, token.ptr);
+        return;
+    }
+
+    switch(prep.code) {
+        case PREP_CODE_CONST:
+        {
+            Token label = lex_next_expected(lex, TOKEN_CODE_WORD);
+            lex_next_expected(lex, TOKEN_CODE_EQUAL);
+            Token o;
+            Value v;
+            if(type_check(ops, lex, ANY_ARGS, VAL_CODE_COUNT, &o, &v) == 0) { assert(0 && "Unreachable"); }
+
+            pack_consts_add(ops, CONST(label.ptr, label.size, v));
+        } break;
+
+        default: { assert(0 && "Unreachable"); }
+    }
+}
+
+static Op keyword(Ops* ops,Lex* lex, Token token) {
     Keyword kw = match_kw(token);
     
     if(kw.code == -1) { 
@@ -125,7 +182,7 @@ static Op keyword(Lex* lex, Token token) {
         {
             Token o;
             Value v;
-            if(type_check(lex, kw.code, &o, &v) == 0) {
+            if(type_check(ops, lex, kw.rval, kw.rcap, &o, &v) == 0) {
                 fprintf(stderr, "[ERROR]: Incorrect type for [%s] keyword operand -> {%s}\n", op_as_str[kw.code], token_as_str[o.code]);
                 return OP(OP_CODE_HALT, VAL_VOID());
             }
@@ -141,7 +198,7 @@ static Op keyword(Lex* lex, Token token) {
         {
             Token o;
             Value v;
-            if(type_check(lex, kw.code, &o, &v) == 0) {
+            if(type_check(ops, lex, kw.rval, kw.rcap, &o, &v) == 0) {
                 fprintf(stderr, "[ERROR]: Incorrect type for [%s] keyword operand -> {%s}\n", op_as_str[kw.code], token_as_str[o.code]);
                 return OP(OP_CODE_HALT, VAL_VOID());
             }
@@ -153,7 +210,7 @@ static Op keyword(Lex* lex, Token token) {
 
             Token o;
             Value v;
-            if(type_check(lex, kw.code, &o, &v) == 0) {
+            if(type_check(ops, lex, kw.rval, kw.rcap, &o, &v) == 0) {
                 fprintf(stderr, "[ERROR]: Incorrect type for [%s] keyword operand -> {%s}\n", op_as_str[kw.code], token_as_str[o.code]);
                 return OP(OP_CODE_HALT, VAL_VOID());
             }
@@ -174,9 +231,11 @@ static Op keyword(Lex* lex, Token token) {
 Ops pack_ops_init(void) {
     Ops ops = {0};
 
-    ops.cap  = 8;
-    ops.data = malloc(sizeof(Op) * ops.cap);
-    ops.size = 0;
+    ops.cap    = 8;
+    ops.data   = malloc(sizeof(Op) * ops.cap);
+    ops.size   = 0;
+
+    ops.consts = pack_consts_init();
 
     return ops;
 }
@@ -215,21 +274,66 @@ void pack_ops_dump(Ops* ops) {
     }
 }
 
+ConstPool pack_consts_init(void) {
+    ConstPool pool = {0};
+    pool.cap  = 8;
+    pool.size = 0;
+    pool.data = calloc(pool.cap, sizeof(Const));
+    return pool;
+}
+
+void pack_consts_add(Ops* ops, Const c) {
+    ConstPool* pool = &ops->consts;
+    if(pool->size + 1 >= pool->cap) {
+        pool->cap *= 2;
+        pool->data = realloc(pool->data, pool->cap * sizeof(Const));
+        pack_consts_add(ops, c);
+        return;
+    }
+
+    pool->data[pool->size++] = c;
+}
+
+void pack_consts_free(Ops* ops) { free(ops->consts.data); }
+
+void pack_consts_dump(Ops* ops) {
+    ConstPool* pool = &ops->consts;
+
+    printf("[CONSTS]:\n");
+    if(pool->size == 0) { printf("  [None]\n"); return; }
+    for(u64 i = 0; i < pool->size; i++) {
+        Const c = pool->data[i];
+
+        switch(c.val.code) {
+            case VAL_CODE_U64 : printf("  [%zu]: CONST [%.*s] with U64 -> {%zu}\n", i, (int) c.len, c.name, c.val.data.U64);  break;
+            case VAL_CODE_I64 : printf("  [%zu]: CONST [%.*s] with I64 -> {%zu}\n", i, (int) c.len, c.name, c.val.data.I64);  break;
+            case VAL_CODE_CHAR: printf("  [%zu]: CONST [%.*s] with CHAR -> {%d}\n", i, (int) c.len, c.name, c.val.data.CHAR); break;
+            default           : printf("  [%zu]: CONST [%.*s] with ? -> {%zu}\n", i  , (int) c.len, c.name, c.val.data.U64);  break;
+        }
+    }
+}
+
 Ops pack_parse(Lex* lex) {
     Ops ops    = pack_ops_init();
     Token root = lex_next(lex);
 
     while(root.code != TOKEN_CODE_EOF) {
         if(ops.data[ops.size - 1].code == OP_CODE_HALT) { break; }
+
         switch(root.code) {
-            case TOKEN_CODE_KEYWORD:
+            case TOKEN_CODE_PREP:
             {
-                pack_ops_add(&ops, keyword(lex, root));
+                parse_prep(&ops, lex, root);
+            }break;
+
+            case TOKEN_CODE_WORD:
+            {
+                pack_ops_add(&ops, keyword(&ops, lex, root));
             } break;
 
             default: 
             {
-                fprintf(stderr, "[ERROR]: Unecpected token [%s]\n", token_as_str[root.code]);
+                fprintf(stderr, "[ERROR]: Unexpected token [%s]\n", token_as_str[root.code]);
                 pack_ops_free(&ops);
                 return (Ops) {.data = NULL};
             } break;

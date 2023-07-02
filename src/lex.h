@@ -8,7 +8,9 @@
 typedef enum {
     TOKEN_CODE_I64    ,
     TOKEN_CODE_U64    ,
-    TOKEN_CODE_KEYWORD,
+    TOKEN_CODE_WORD,
+    TOKEN_CODE_PREP   ,
+    TOKEN_CODE_EQUAL  ,
     TOKEN_CODE_CHAR   ,
     TOKEN_CODE_EOF    ,
     TOKEN_CODE_COUNT  ,

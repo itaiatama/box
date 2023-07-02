@@ -1,17 +1,23 @@
-put 'H'
-put 'e'
-put 'l'
-put 'l'
-put 'o'
-put ','
-put ' '
-put 'W'
-put 'o'
-put 'r'
-put 'l'
-put 'd'
-put '!'
-put '\n'
-flip 14u
-print 14u
-halt
+@const NL  = '\n'
+@const LEN = 14u
+
+#@name begin:
+  put 'H'
+  put 'e'
+  put 'l'
+  put 'l'
+  put 'o'
+  put ','
+  put ' '
+  put 'W'
+  put 'o'
+  put 'r'
+  put 'l'
+  put 'd'
+  put '!'
+  put NL
+
+  flip  LEN
+  print LEN
+  halt
+#@end
