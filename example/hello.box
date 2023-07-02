@@ -15,8 +15,3 @@ put '\n'
 flip 14u
 print 14u
 halt
-
-# H
-# e
-# ...
-# \n

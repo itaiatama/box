@@ -122,6 +122,8 @@ ErrCode box_exec_op(Box* box, Op op) {
             if(op.operand.code != VAL_CODE_U64) { return ERR_CODE_INVALID_OPERAND; }
             u64 size = op.operand.data.U64 - 1;
 
+            if(box->ip < size) { return ERR_CODE_STACK_UNDERFLOW; }
+
             Value tmp = {0};
             for(u64 i = 0; i < size; i++) {
                 tmp = box->stack[i];
